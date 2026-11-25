@@ -12,22 +12,19 @@ const applicationRoutes = require('./routes/applications');
 
 const app = express();
 
-// Allow requests from any Vercel preview URL and production URL
-const allowedOrigins = [
-  'https://jobapply-flax.vercel.app',
-  /https:\/\/jobapply.*\.vercel\.app$/,
-  'http://localhost:5173',
-];
-
+// ─── CORS ───────────────────────────────────────────────────────────────────
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, curl, same-origin)
-      if (!origin) return callback(null, true);
-      const isAllowed = allowedOrigins.some((o) =>
-        typeof o === 'string' ? o === origin : o.test(origin)
-      );
-      callback(isAllowed ? null : new Error('Not allowed by CORS'), isAllowed);
+      // Allow: no-origin (mobile/curl), localhost dev, any *.vercel.app URL
+      if (
+        !origin ||
+        origin.includes('localhost') ||
+        origin.includes('vercel.app')
+      ) {
+        return callback(null, true);
+      }
+      callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
   })
@@ -35,10 +32,8 @@ app.use(
 
 app.use(express.json());
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', app: 'JobPilot' });
-});
-
+// ─── Routes ─────────────────────────────────────────────────────────────────
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'JobPilot' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/resume', resumeRoutes);
 app.use('/api/preferences', preferencesRoutes);
@@ -51,16 +46,8 @@ app.use((err, req, res, next) => {
   res.status(400).json({ message: err.message || 'Unexpected server error.' });
 });
 
-// ─── Startup ────────────────────────────────────────────────────────────────
-// On Vercel (serverless) we cannot call app.listen() – the platform calls the
-// exported handler directly for each request.  We still need to connect to
-// MongoDB on first invocation, so we do it lazily via the connectDB helper.
-//
-// When running locally (node server.js / npm run dev) we still start the
-// HTTP server so the development workflow is unchanged.
-
+// ─── DB connection (lazy, cached across warm serverless invocations) ─────────
 let dbReady = false;
-
 async function ensureDB() {
   if (!dbReady) {
     await connectDB();
@@ -69,25 +56,23 @@ async function ensureDB() {
   }
 }
 
-// Vercel serverless entry-point
+// ─── Vercel serverless export ────────────────────────────────────────────────
+// Vercel calls module.exports(req, res) for each request.
 module.exports = async (req, res) => {
   await ensureDB();
-  app(req, res);
+  return app(req, res);
 };
 
-// Local development entry-point
+// ─── Local dev: start HTTP server ───────────────────────────────────────────
 if (require.main === module) {
-  // Only import the cron scheduler in long-running server mode.
-  // node-cron does NOT work on serverless (each request = new process).
   const { initAllSchedules } = require('./services/schedulerService');
-
   ensureDB()
     .then(() => initAllSchedules())
     .then(() => {
       const PORT = process.env.PORT || 5001;
-      app.listen(PORT, () => {
-        console.log(`JobPilot backend running on http://localhost:${PORT}`);
-      });
+      app.listen(PORT, () =>
+        console.log(`JobPilot backend running on http://localhost:${PORT}`)
+      );
     })
     .catch((err) => {
       console.error('Failed to start server:', err);
