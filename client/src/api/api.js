@@ -1,9 +1,6 @@
 /**
- * Lightweight API fetch wrapper.
- *
- * URL strategy:
- *  - Local dev:  Vite proxy forwards /api → http://localhost:5001
- *  - Vercel:     Frontend + backend on same domain → relative /api/... just works
+ * Lightweight fetch wrapper that attaches the stored JWT token
+ * and normalizes JSON error handling.
  */
 const TOKEN_KEY = 'jobpilot_token';
 
@@ -30,7 +27,10 @@ export async function apiRequest(path, options = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(path, {
+    ...options,
+    headers,
+  });
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
